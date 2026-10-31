@@ -1,0 +1,20 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Large model files (downloaded automatically on first run)
+phase1/models/
+*.onnx
+*.bin
+
+# Personal data and Claude Code session files - never published
+phase1/data/
+phase1/session/
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Personal details for Jarvis - never published
+phase1/about_me.txt

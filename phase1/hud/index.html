@@ -1,0 +1,697 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jarvis HUD</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #07080a;
+    --panel: rgba(12, 14, 17, 0.62);
+    --line: rgba(255, 255, 255, 0.07);
+    --line-strong: rgba(255, 255, 255, 0.14);
+    --text: #e9e6e1;
+    --dim: #8a8780;
+    --faint: #55534e;
+    --accent: 232, 92, 160;           /* updated live from the orb's colour */
+    --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+    --sans: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); }
+  body {
+    font-family: var(--mono); font-size: 12px; overflow: hidden;
+    background:
+      radial-gradient(ellipse 60% 55% at 50% 48%, rgba(var(--accent), 0.07), transparent 70%),
+      radial-gradient(ellipse at center, #0b0d10 0%, #050607 100%);
+  }
+  /* faint grid + scanlines */
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse at center, black 30%, transparent 80%);
+  }
+  body::after {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 50;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,0.12) 0 1px, transparent 1px 3px);
+    opacity: 0.35;
+  }
+
+  .app {
+    position: relative; z-index: 1; height: 100vh;
+    display: grid; grid-template-columns: 300px 1fr 320px; grid-template-rows: 68px 1fr 34px;
+    grid-template-areas: "head head head" "left core right" "foot foot foot";
+  }
+
+  /* ---------- header ---------- */
+  header {
+    grid-area: head; display: flex; align-items: center; justify-content: space-between;
+    padding: 0 22px; border-bottom: 1px solid var(--line);
+  }
+  .brand { display: flex; flex-direction: column; gap: 5px; }
+  .brand h1 { margin: 0; font: 500 21px/1 var(--sans); letter-spacing: 0.32em; }
+  .brand h1 span { font: 400 10px var(--mono); letter-spacing: 0.1em; color: var(--dim); margin-left: 4px; }
+  .brand small { font-size: 9.5px; letter-spacing: 0.24em; color: var(--dim); text-transform: uppercase; }
+
+  .engine { display: flex; padding: 3px; border: 1px solid var(--line-strong); border-radius: 999px; background: rgba(0,0,0,0.3); }
+  .engine button {
+    font: 500 11px var(--mono); color: var(--dim); background: none; border: 0; cursor: pointer;
+    padding: 7px 16px; border-radius: 999px; display: flex; align-items: center; gap: 8px; letter-spacing: 0.04em;
+  }
+  .engine button .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); }
+  .engine button.on { background: rgba(255,255,255,0.92); color: #111; }
+  .engine button.on .dot { background: rgb(var(--accent)); box-shadow: 0 0 8px rgb(var(--accent)); }
+
+  .clock { text-align: right; }
+  .clock .t { font: 300 30px/1 var(--sans); letter-spacing: 0.04em; }
+  .clock .t sub { font: 400 11px var(--mono); color: var(--dim); vertical-align: baseline; margin-left: 3px; }
+  .clock .d { font-size: 9.5px; letter-spacing: 0.24em; color: var(--dim); margin-top: 5px; text-transform: uppercase; }
+
+  /* ---------- columns + panels ---------- */
+  .col { display: flex; flex-direction: column; gap: 12px; padding: 14px; min-height: 0; overflow: hidden; }
+  .left { grid-area: left; border-right: 1px solid var(--line); }
+  .right { grid-area: right; border-left: 1px solid var(--line); }
+
+  .panel { position: relative; border: 1px solid var(--line); background: var(--panel); padding: 12px 13px; backdrop-filter: blur(4px); }
+  .panel::before, .panel::after {
+    content: ""; position: absolute; width: 9px; height: 9px; border-color: rgba(var(--accent), 0.75); border-style: solid;
+    transition: border-color 0.6s;
+  }
+  .panel::before { top: -1px; left: -1px; border-width: 1px 0 0 1px; }
+  .panel::after { bottom: -1px; right: -1px; border-width: 0 1px 1px 0; }
+  .panel.grow { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+  .label {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    font-size: 9.5px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--dim); margin-bottom: 10px;
+  }
+  .label b { font-weight: 500; color: var(--text); display: flex; align-items: center; gap: 7px; }
+  .label b::before { content: ""; width: 5px; height: 5px; background: rgb(var(--accent)); box-shadow: 0 0 6px rgb(var(--accent)); }
+  .label i { font-style: normal; color: var(--faint); letter-spacing: 0.12em; }
+
+  /* vitals */
+  .vital { display: grid; grid-template-columns: 1fr 92px; align-items: end; padding: 8px 0; border-top: 1px dashed var(--line); }
+  .vital:first-of-type { border-top: 0; padding-top: 0; }
+  .vital .k { font-size: 9px; letter-spacing: 0.18em; color: var(--dim); text-transform: uppercase; }
+  .vital .v { font: 400 25px/1.1 var(--sans); margin-top: 4px; }
+  .vital .v small { font: 400 10.5px var(--mono); color: var(--dim); margin-left: 6px; }
+  .vital svg { width: 92px; height: 30px; overflow: visible; }
+
+  /* study gauge */
+  .gauge .big { display: flex; align-items: baseline; gap: 8px; }
+  .gauge .big strong { font: 400 38px/1 var(--sans); color: rgb(var(--accent)); text-shadow: 0 0 18px rgba(var(--accent), 0.45); }
+  .gauge .big span { color: var(--dim); font-size: 11px; }
+  .bar { position: relative; height: 10px; margin: 12px 0 6px; background: rgba(255,255,255,0.04); border: 1px solid var(--line); }
+  .bar .fill { position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, rgba(var(--accent),0.25), rgba(var(--accent),0.9)); box-shadow: 0 0 12px rgba(var(--accent),0.5); transition: width 0.8s; }
+  .bar::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(90deg, transparent 0 7px, rgba(0,0,0,0.55) 7px 8px); }
+  .ticks { display: flex; justify-content: space-between; font-size: 8.5px; color: var(--faint); }
+
+  /* directives */
+  .directives { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+  .directives li { display: flex; gap: 9px; align-items: flex-start; line-height: 1.45; color: var(--text); cursor: pointer; font-size: 11px; }
+  .directives li .box { flex: none; width: 11px; height: 11px; margin-top: 2px; border: 1px solid var(--line-strong); }
+  .directives li.done { color: var(--faint); text-decoration: line-through; }
+  .directives li.done .box { background: rgb(var(--accent)); border-color: rgb(var(--accent)); box-shadow: 0 0 6px rgba(var(--accent),0.6); }
+
+  /* transcript */
+  .transcript { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 9px; font-size: 11px; line-height: 1.5; scrollbar-width: thin; }
+  .transcript .line .who { font-size: 9px; letter-spacing: 0.18em; color: var(--faint); text-transform: uppercase; }
+  .transcript .line.jarvis .who { color: rgb(var(--accent)); }
+  .transcript .line .secs { color: var(--faint); font-size: 9px; margin-left: 6px; }
+  .transcript .empty { color: var(--faint); }
+
+  /* ---------- core ---------- */
+  .core { grid-area: core; position: relative; min-width: 0; min-height: 0; }
+  #orb { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .core-text { position: absolute; left: 0; right: 0; bottom: 26px; text-align: center; pointer-events: none; }
+  .core-text h2 { margin: 0; font: 300 clamp(34px, 4.4vw, 58px)/1 var(--sans); letter-spacing: 0.42em; padding-left: 0.42em; text-shadow: 0 0 30px rgba(var(--accent), 0.35); }
+  .core-text p { margin: 10px 0 18px; font-size: 9.5px; letter-spacing: 0.26em; color: var(--dim); text-transform: uppercase; }
+  .pills { display: inline-flex; gap: 6px; pointer-events: auto; }
+  .pills span {
+    font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; padding: 6px 11px;
+    border: 1px solid var(--line); color: var(--faint); background: rgba(0,0,0,0.35); transition: all 0.3s;
+  }
+  .pills span.on { color: #0a0a0a; background: rgb(var(--accent)); border-color: rgb(var(--accent)); box-shadow: 0 0 14px rgba(var(--accent),0.6); }
+  .core-status { position: absolute; top: 16px; left: 0; right: 0; text-align: center; font-size: 9.5px; letter-spacing: 0.24em; color: var(--dim); text-transform: uppercase; }
+  .core-status em { font-style: normal; color: rgb(var(--accent)); }
+
+  /* ---------- right column ---------- */
+  .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .actions button, .planned span {
+    font: 500 10px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; text-align: left;
+    color: var(--text); background: rgba(255,255,255,0.025); border: 1px solid var(--line); padding: 10px 10px; cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .actions button:hover { border-color: rgba(var(--accent), 0.7); background: rgba(var(--accent), 0.08); }
+  .actions button:disabled { opacity: 0.4; cursor: default; }
+  .planned { display: none; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
+  .planned.open { display: grid; }
+  .planned span { color: var(--faint); cursor: default; border-style: dashed; }
+  .planned span small { display: block; font-size: 8.5px; color: var(--faint); margin-top: 3px; letter-spacing: 0.08em; }
+  .linkish { background: none; border: 0; padding: 0; color: var(--dim); font: inherit; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; cursor: pointer; margin-top: 9px; }
+  .linkish:hover { color: var(--text); }
+
+  .talk {
+    width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px;
+    font: 500 12px var(--mono); letter-spacing: 0.16em; text-transform: uppercase;
+    padding: 15px; margin-bottom: 9px; cursor: pointer; color: var(--text);
+    background: rgba(var(--accent), 0.1); border: 1px solid rgba(var(--accent), 0.6);
+    box-shadow: inset 0 0 22px rgba(var(--accent), 0.12); transition: all 0.25s;
+  }
+  .talk:hover { background: rgba(var(--accent), 0.18); }
+  .talk.live { background: rgb(var(--accent)); color: #0a0a0a; box-shadow: 0 0 26px rgba(var(--accent), 0.6); }
+  .talk:disabled { opacity: 0.45; cursor: default; }
+  .talk svg { width: 15px; height: 15px; }
+  .hint { color: var(--faint); font-size: 10px; line-height: 1.5; margin: 0 0 9px; }
+  .hint kbd { font: inherit; color: var(--dim); border: 1px solid var(--line-strong); padding: 0 4px; }
+  .ask { display: flex; gap: 6px; }
+  .ask input {
+    flex: 1; min-width: 0; font: 400 11.5px var(--mono); color: var(--text); background: rgba(0,0,0,0.4);
+    border: 1px solid var(--line-strong); padding: 9px 10px; outline: none;
+  }
+  .ask input:focus { border-color: rgba(var(--accent), 0.7); }
+  .ask button { font: 500 10px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: #0a0a0a; background: var(--text); border: 0; padding: 0 12px; cursor: pointer; }
+
+  .roadmap .now { font: 400 15px/1.35 var(--sans); }
+  .roadmap .pct { display: flex; justify-content: space-between; color: var(--dim); font-size: 9.5px; margin-top: 2px; }
+  .roadmap ol { margin: 10px 0 0; padding: 0; list-style: none; counter-reset: n; }
+  .roadmap li { counter-increment: n; color: var(--dim); font-size: 10.5px; padding: 3px 0; display: flex; gap: 8px; }
+  .roadmap li::before { content: "0" counter(n); color: var(--faint); }
+
+  .wire { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; overflow-y: auto; min-height: 0; flex: 1; scrollbar-width: thin; }
+  .wire li { font-size: 10.5px; line-height: 1.5; color: var(--text); padding-left: 10px; border-left: 1px solid rgba(var(--accent), 0.5); }
+  .wire li span { display: block; font-size: 8.5px; letter-spacing: 0.16em; color: var(--faint); text-transform: uppercase; }
+
+  /* ---------- footer ---------- */
+  footer {
+    grid-area: foot; display: flex; align-items: center; justify-content: space-between; padding: 0 22px;
+    border-top: 1px solid var(--line); font-size: 9.5px; letter-spacing: 0.16em; color: var(--dim); text-transform: uppercase;
+  }
+  footer .conn::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 8px; background: #d9534f; vertical-align: 1px; }
+  footer .conn.ok::before { background: #5fd38d; box-shadow: 0 0 6px #5fd38d; }
+  footer .conn.demo::before { background: #e8b44c; }
+
+  .toast {
+    position: fixed; top: 80px; left: 50%; transform: translate(-50%, -8px); opacity: 0; z-index: 60;
+    background: rgba(10,10,12,0.92); border: 1px solid rgba(var(--accent),0.6); padding: 9px 14px; font-size: 11px;
+    transition: all 0.25s; pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  /* narrow screens: stack and scroll */
+  @media (max-width: 1100px) {
+    body { overflow: auto; }
+    .app { height: auto; grid-template-columns: 1fr; grid-template-rows: auto 70vh auto auto auto;
+           grid-template-areas: "head" "core" "right" "left" "foot"; }
+    .left, .right { border: 0; overflow: visible; }
+    .panel.grow { min-height: 220px; }
+    header { padding: 12px 16px; flex-wrap: wrap; gap: 12px; }
+    footer { padding: 12px 16px; flex-wrap: wrap; gap: 8px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand">
+      <h1>JARVIS<span>/ v1</span></h1>
+      <small>Your command centre</small>
+    </div>
+    <div class="engine" role="group" aria-label="Claude model">
+      <button data-model="haiku" class="on"><span class="dot"></span>Haiku · fast</button>
+      <button data-model="sonnet"><span class="dot"></span>Sonnet · smart</button>
+    </div>
+    <div class="clock"><div class="t" id="time">--:--<sub>--</sub></div><div class="d" id="date"></div></div>
+  </header>
+
+  <!-- LEFT -->
+  <section class="col left">
+    <div class="panel">
+      <div class="label"><b>System vitals</b><i>live</i></div>
+      <div class="vital"><div><div class="k">Requests today</div><div class="v" id="v-today">0</div></div><svg id="sp-hourly" viewBox="0 0 92 30"></svg></div>
+      <div class="vital"><div><div class="k">Avg reply</div><div class="v" id="v-avg">--</div></div><svg id="sp-replies" viewBox="0 0 92 30"></svg></div>
+      <div class="vital"><div><div class="k">Study streak</div><div class="v" id="v-streak">0<small>days</small></div></div><svg id="sp-streak" viewBox="0 0 92 30"></svg></div>
+      <div class="vital"><div><div class="k">Applications</div><div class="v" id="v-apps">0<small>sent</small></div></div><svg id="sp-pipe" viewBox="0 0 92 30"></svg></div>
+    </div>
+
+    <div class="panel gauge">
+      <div class="label"><b>Study · this week</b><i id="g-target">target 14h</i></div>
+      <div class="big"><strong id="g-hours">0</strong><span id="g-of">of 14 hours</span></div>
+      <div class="bar"><div class="fill" id="g-fill" style="width:0%"></div></div>
+      <div class="ticks" id="g-ticks"></div>
+    </div>
+
+    <div class="panel">
+      <div class="label"><b>Directives</b><i id="d-count">0 / 0</i></div>
+      <ul class="directives" id="directives"></ul>
+    </div>
+
+    <div class="panel grow">
+      <div class="label"><b>Transcript</b><i>this session</i></div>
+      <div class="transcript" id="transcript"><div class="empty">Nothing yet. Tap to talk or type below.</div></div>
+    </div>
+  </section>
+
+  <!-- CORE -->
+  <section class="core">
+    <canvas id="orb" aria-hidden="true"></canvas>
+    <div class="core-status">Core · <em id="status-word">ready</em></div>
+    <div class="core-text">
+      <h2>JARVIS</h2>
+      <p>Personal command core · Claude Code mode</p>
+      <div class="pills" id="pills">
+        <span data-s="idle">Idle</span><span data-s="listening">Listening</span><span data-s="working">Working</span><span data-s="speaking">Speaking</span><span data-s="error">Error</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- RIGHT -->
+  <section class="col right">
+    <div class="panel">
+      <div class="label"><b>Quick actions</b><i>tier 2</i></div>
+      <div class="actions" id="actions"></div>
+      <button class="linkish" id="toggle-planned">+ Planned skills</button>
+      <div class="planned" id="planned"></div>
+    </div>
+
+    <div class="panel">
+      <div class="label"><b>Voice</b><i>local speech</i></div>
+      <button class="talk" id="talk">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+        <span id="talk-word">Tap to talk</span>
+      </button>
+      <p class="hint">Tap or press <kbd>Space</kbd> to talk, again to send. <kbd>Esc</kbd> cancels or stops speech.</p>
+      <form class="ask" id="ask"><input id="ask-input" placeholder="Ask or continue…" autocomplete="off"><button>Send</button></form>
+    </div>
+
+    <div class="panel roadmap">
+      <div class="label"><b>Python roadmap</b><i id="r-pct">0%</i></div>
+      <div class="now" id="r-now">—</div>
+      <div class="bar"><div class="fill" id="r-fill" style="width:0%"></div></div>
+      <ol id="r-next"></ol>
+    </div>
+
+    <div class="panel grow">
+      <div class="label"><b>AI wire</b><i>intel</i></div>
+      <ul class="wire" id="wire"></ul>
+    </div>
+  </section>
+
+  <footer>
+    <span class="conn" id="conn">Connecting…</span>
+    <span>Voice local · Whisper + Kokoro</span>
+    <span id="foot-model">Claude Code · haiku</span>
+  </footer>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* =====================================================================
+   Jarvis HUD
+   Talks to server.py over a WebSocket. Opened without the server
+   (or with ?demo in the address) it runs a demo with sample data.
+   ===================================================================== */
+const $ = id => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+
+const S = { state: 'idle', model: 'haiku', panels: null, stats: null, demo: false, level: 0, busy: false };
+
+/* ---------- quick actions (real prompts sent to Claude) ---------- */
+const ACTIONS = [
+  { label: 'Python tip',  prompt: 'Give me one genuinely useful Python tip for a beginner, with a tiny example I can picture.' },
+  { label: 'Quiz me',     prompt: 'Ask me one beginner Python quiz question. Just the question, then wait for my answer.' },
+  { label: 'Plan tonight', prompt: 'I have about two hours tonight to learn Python. Give me a quick plan for the session.' },
+  { label: 'Explain a concept', prompt: 'Pick one core Python concept a beginner often finds confusing and explain it simply.' },
+  { label: 'Motivate me', prompt: 'I am learning Python in my spare time. Give me a short, honest push to get started tonight.' },
+  { label: 'What can you do', prompt: 'In two sentences, what can you help me with right now?' },
+];
+const PLANNED = [
+  ['/plan-today', 'Phase 4'], ['/ai-intel', 'Phase 4'], ['/study-session', 'Phase 4'], ['/code-review', 'Phase 4'],
+  ['/job-scout', 'Phase 5'], ['/cv-tailor', 'Phase 5'], ['/interview-drill', 'Phase 5'], ['/weekly-review', 'Phase 5'],
+];
+
+/* ---------- connection ---------- */
+let ws = null;
+function connect() {
+  if (location.protocol === 'file:' || params.has('demo')) return startDemo();
+  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen = () => setConn('ok', 'Bridge connected');
+  ws.onmessage = e => onMessage(JSON.parse(e.data));
+  ws.onclose = () => { setConn('', 'Bridge offline · retrying'); setTimeout(connect, 1500); };
+}
+function send(msg) {
+  if (S.demo) return demoHandle(msg);
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg));
+  else toast('Not connected to the Jarvis server');
+}
+function setConn(cls, text) { const c = $('conn'); c.className = 'conn ' + cls; c.textContent = text; }
+
+function onMessage(m) {
+  switch (m.type) {
+    case 'hello':
+      setModel(m.model); S.panels = m.panels; S.stats = m.stats;
+      renderPanels(); renderStats(); (m.transcript || []).forEach(addLine); setState(m.state); break;
+    case 'state': setState(m.state); break;
+    case 'level': S.level = m.value; break;
+    case 'transcript': addLine(m); break;
+    case 'panels': S.panels = m.data; renderPanels(); break;
+    case 'stats': S.stats = m.data; renderStats(); break;
+    case 'model': setModel(m.model); break;
+    case 'toast': toast(m.text); break;
+  }
+}
+
+/* ---------- state ---------- */
+const STATUS_WORDS = { idle: 'ready', listening: 'listening', working: 'thinking', speaking: 'speaking', error: 'error' };
+function setState(s) {
+  S.state = s;
+  document.querySelectorAll('#pills span').forEach(p => p.classList.toggle('on', p.dataset.s === s));
+  $('status-word').textContent = STATUS_WORDS[s] || s;
+  const talk = $('talk');
+  talk.classList.toggle('live', s === 'listening');
+  $('talk-word').textContent = s === 'listening' ? 'Tap to send' : s === 'speaking' ? 'Tap to stop' : 'Tap to talk';
+  talk.disabled = s === 'working';
+  document.querySelectorAll('#actions button').forEach(b => b.disabled = s !== 'idle');
+  orb.setState(s);
+}
+function setModel(m) {
+  S.model = m;
+  document.querySelectorAll('.engine button').forEach(b => b.classList.toggle('on', b.dataset.model === m));
+  $('foot-model').textContent = 'Claude Code · ' + m;
+}
+
+/* ---------- rendering ---------- */
+function sparkline(svg, values, opts = {}) {
+  const w = 92, h = 30, v = values && values.length ? values : [0, 0];
+  const max = Math.max(...v, opts.min || 1), n = v.length;
+  const pts = v.map((y, i) => [ (i / Math.max(1, n - 1)) * w, h - 3 - (y / max) * (h - 8) ]);
+  const d = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join('');
+  const last = pts[pts.length - 1];
+  svg.innerHTML =
+    `<path d="${d} L${w} ${h} L0 ${h}Z" fill="rgba(var(--accent),0.10)"/>` +
+    `<path d="${d}" fill="none" stroke="rgb(var(--accent))" stroke-width="1.2"/>` +
+    `<circle cx="${last[0]}" cy="${last[1]}" r="2" fill="rgb(var(--accent))"/>`;
+}
+function bars(svg, values) {
+  const w = 92, h = 30, n = values.length, max = Math.max(...values, 1), bw = w / n;
+  svg.innerHTML = values.map((v, i) => {
+    const bh = Math.max(2, (v / max) * (h - 4));
+    return `<rect x="${i * bw + 2}" y="${h - bh}" width="${bw - 4}" height="${bh}" fill="rgba(var(--accent),${0.35 + 0.65 * v / max})"/>`;
+  }).join('');
+}
+
+function renderStats() {
+  const st = S.stats || {};
+  $('v-today').textContent = st.today ?? 0;
+  $('v-avg').innerHTML = st.avg != null ? `${st.avg}<small>sec</small>` : '--';
+  sparkline($('sp-hourly'), st.hourly);
+  sparkline($('sp-replies'), st.recent, { min: 5 });
+}
+
+function renderPanels() {
+  const p = S.panels; if (!p) return;
+  const streak = p.streak_days || 0;
+  $('v-streak').innerHTML = `${streak}<small>day${streak === 1 ? '' : 's'}</small>`;
+  bars($('sp-streak'), (p.study_last_7 || [0,0,0,0,0,0,0]));
+  const pipe = p.pipeline || {};
+  $('v-apps').innerHTML = `${pipe.applied || 0}<small>sent · ${pipe.interview || 0} interview</small>`;
+  bars($('sp-pipe'), [pipe.found || 0, pipe.applied || 0, pipe.interview || 0, pipe.offer || 0]);
+
+  const hrs = p.study_hours_week || 0, target = p.study_target_hours || 14;
+  $('g-hours').textContent = hrs;
+  $('g-of').textContent = `of ${target} hours`;
+  $('g-target').textContent = `target ${target}h`;
+  $('g-fill').style.width = Math.min(100, hrs / target * 100) + '%';
+  $('g-ticks').innerHTML = [0, .25, .5, .75, 1].map(f => `<span>${Math.round(target * f)}</span>`).join('');
+
+  const dirs = p.directives || [];
+  $('d-count').textContent = `${dirs.filter(d => d.done).length} / ${dirs.length}`;
+  $('directives').innerHTML = dirs.map((d, i) =>
+    `<li class="${d.done ? 'done' : ''}" data-i="${i}"><span class="box"></span><span>${esc(d.text)}</span></li>`).join('');
+
+  const r = p.roadmap || {};
+  $('r-now').textContent = r.current || '—';
+  $('r-pct').textContent = (r.progress || 0) + '%';
+  $('r-fill').style.width = (r.progress || 0) + '%';
+  $('r-next').innerHTML = (r.next || []).slice(0, 3).map(t => `<li>${esc(t)}</li>`).join('');
+
+  $('wire').innerHTML = (p.wire || []).map(w => `<li><span>${esc(w.tag || '')}</span>${esc(w.text)}</li>`).join('');
+}
+
+function addLine(m) {
+  const box = $('transcript');
+  box.querySelector('.empty')?.remove();
+  const div = document.createElement('div');
+  div.className = 'line ' + m.who;
+  div.innerHTML = `<div class="who">${m.who === 'you' ? 'You' : 'Jarvis'}${m.secs ? `<span class="secs">${m.secs}s</span>` : ''}</div>${esc(m.text)}`;
+  box.appendChild(div);
+  while (box.children.length > 40) box.firstChild.remove();
+  box.scrollTop = box.scrollHeight;
+}
+
+let toastTimer;
+function toast(text) {
+  const t = $('toast'); t.textContent = text; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+}
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+/* ---------- controls ---------- */
+function talkPressed() {
+  if (S.state === 'listening') send({ type: 'talk_stop' });
+  else if (S.state === 'speaking') send({ type: 'cancel' });
+  else if (S.state === 'idle' || S.state === 'error') send({ type: 'talk_start' });
+}
+$('talk').onclick = talkPressed;
+$('ask').onsubmit = e => {
+  e.preventDefault();
+  const text = $('ask-input').value.trim();
+  if (!text) return;
+  if (S.state !== 'idle') return toast('Hang on, still busy');
+  send({ type: 'text', text }); $('ask-input').value = '';
+};
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') { if (e.key === 'Escape') e.target.blur(); return; }
+  if (e.code === 'Space') { e.preventDefault(); talkPressed(); }
+  if (e.key === 'Escape') send({ type: 'cancel' });
+});
+document.querySelectorAll('.engine button').forEach(b => b.onclick = () => send({ type: 'model', model: b.dataset.model }));
+$('directives').onclick = e => {
+  const li = e.target.closest('li'); if (!li) return;
+  send({ type: 'directive', index: Number(li.dataset.i) });
+};
+$('actions').innerHTML = ACTIONS.map((a, i) => `<button data-i="${i}">${a.label}</button>`).join('');
+$('actions').onclick = e => {
+  const b = e.target.closest('button'); if (!b || S.state !== 'idle') return;
+  send({ type: 'text', text: ACTIONS[b.dataset.i].prompt, label: ACTIONS[b.dataset.i].label });
+};
+$('planned').innerHTML = PLANNED.map(([n, when]) => `<span>${n}<small>${when}</small></span>`).join('');
+$('toggle-planned').onclick = () => {
+  const open = $('planned').classList.toggle('open');
+  $('toggle-planned').textContent = (open ? '− ' : '+ ') + 'Planned skills';
+};
+
+/* ---------- clock ---------- */
+function tick() {
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  $('time').innerHTML = `${p(d.getHours())}:${p(d.getMinutes())}<sub>${p(d.getSeconds())}</sub>`;
+  $('date').textContent = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+}
+setInterval(tick, 1000); tick();
+
+/* =====================================================================
+   THE ORB — a 3D particle sphere drawn on a 2D canvas.
+   Each state has its own colour and motion; mic/voice level makes it pulse.
+   ===================================================================== */
+const orb = (() => {
+  const canvas = $('orb'), ctx = canvas.getContext('2d');
+  const COLORS = { idle: [232, 92, 160], listening: [110, 226, 128], working: [242, 188, 84], speaking: [72, 222, 214], error: [255, 78, 66] };
+  const MOTION = {            // spin speed, turbulence, breathing
+    idle:      [0.0016, 0.018, 0.020],
+    listening: [0.0030, 0.030, 0.010],
+    working:   [0.0085, 0.085, 0.030],
+    speaking:  [0.0040, 0.035, 0.012],
+    error:     [0.0010, 0.120, 0.000],
+  };
+  let W = 0, H = 0, dpr = 1, R = 100;
+  let color = COLORS.idle.slice(), target = COLORS.idle, motion = MOTION.idle.slice(), targetMotion = MOTION.idle;
+  let rot = 0, t = 0, level = 0, state = 'idle';
+
+  // particles: a dense ball, brighter shell, outer dust
+  const N = 7600, DUST = 900, SPARK = 220;
+  const P = [];
+  const rand = Math.random;
+  function dir() { const u = rand() * 2 - 1, a = rand() * Math.PI * 2, s = Math.sqrt(1 - u * u); return [s * Math.cos(a), u, s * Math.sin(a)]; }
+  for (let i = 0; i < N; i++) {
+    const [x, y, z] = dir(), r = 0.08 + 0.92 * Math.cbrt(rand());
+    P.push({ x, y, z, r, ph: rand() * 6.283, f: 0.6 + rand() * 1.8, s: 0.9 + rand() * 1.4, b: 0.35 + rand() * 0.65, kind: 0 });
+  }
+  for (let i = 0; i < DUST; i++) {
+    const [x, y, z] = dir(), r = 1.05 + rand() * 0.7;
+    P.push({ x, y, z, r, ph: rand() * 6.283, f: 0.3 + rand(), s: 0.6 + rand() * 0.8, b: 0.08 + rand() * 0.22, kind: 1 });
+  }
+  for (let i = 0; i < SPARK; i++) {
+    const [x, y, z] = dir(), r = 0.5 + rand() * 0.5;
+    P.push({ x, y, z, r, ph: rand() * 6.283, f: 1 + rand() * 2, s: 3 + rand() * 5, b: 0.5 + rand() * 0.5, kind: 2 });
+  }
+
+  const sprite = document.createElement('canvas'); sprite.width = sprite.height = 32;
+  const sctx = sprite.getContext('2d');
+  function paintSprite(c) {
+    sctx.clearRect(0, 0, 32, 32);
+    const g = sctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+    g.addColorStop(0, `rgba(255,255,255,1)`);
+    g.addColorStop(0.18, `rgba(${c[0]},${c[1]},${c[2]},0.9)`);
+    g.addColorStop(1, `rgba(${c[0]},${c[1]},${c[2]},0)`);
+    sctx.fillStyle = g; sctx.fillRect(0, 0, 32, 32);
+  }
+
+  function resize() {
+    dpr = Math.min(2, window.devicePixelRatio || 1);
+    const r = canvas.getBoundingClientRect();
+    W = r.width; H = r.height;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    R = Math.min(W, H * 0.86) * 0.30;
+  }
+  window.addEventListener('resize', resize);
+
+  let frame = 0;
+  function draw() {
+    frame++; t += 1 / 60;
+    for (let i = 0; i < 3; i++) color[i] += (target[i] - color[i]) * 0.045;
+    for (let i = 0; i < 3; i++) motion[i] += (targetMotion[i] - motion[i]) * 0.05;
+    level += ((S.level || 0) - level) * 0.22;
+    if (frame % 4 === 0) {
+      document.documentElement.style.setProperty('--accent', color.map(Math.round).join(','));
+      paintSprite(color.map(Math.round));
+    }
+    rot += motion[0];
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    const cx = W / 2, cy = H * 0.43;
+    const c = color.map(Math.round);
+    const breathe = 1 + Math.sin(t * 1.3) * motion[2];
+    const swell = 1 + level * 0.22;
+    const flicker = state === 'error' ? (Math.random() < 0.08 ? 0.4 : 1) : 1;
+
+    // core glow
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 1.5 * swell);
+    g.addColorStop(0, `rgba(${c},${0.30 + level * 0.25})`);
+    g.addColorStop(0.4, `rgba(${c},0.10)`);
+    g.addColorStop(1, `rgba(${c},0)`);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = `rgb(${c})`;
+    const cosR = Math.cos(rot), sinR = Math.sin(rot), tilt = 0.32, cosT = Math.cos(tilt), sinT = Math.sin(tilt);
+    const fov = 2.6;
+
+    for (let i = 0; i < P.length; i++) {
+      const p = P[i];
+      const wob = Math.sin(t * p.f + p.ph) * motion[1] * (p.kind === 1 ? 2.2 : 1);
+      // speaking: ripples travel outwards
+      const ripple = state === 'speaking' ? Math.sin(p.r * 9 - t * 7) * level * 0.08 : 0;
+      const rr = (p.r + wob + ripple) * breathe * (p.kind === 1 ? 1 + level * 0.1 : swell);
+      let x = p.x * rr, y = p.y * rr, z = p.z * rr;
+      // spin (dust spins slower)
+      const cr = p.kind === 1 ? Math.cos(rot * 0.5) : cosR, sr = p.kind === 1 ? Math.sin(rot * 0.5) : sinR;
+      const x1 = x * cr - z * sr, z1 = x * sr + z * cr;
+      const y1 = y * cosT - z1 * sinT, z2 = y * sinT + z1 * cosT;
+      const scale = fov / (fov + z2);
+      const sx = cx + x1 * R * scale, sy = cy + y1 * R * scale;
+      const depth = (1 - z2) * 0.5;                   // 0 back .. 1 front
+      const twinkle = 0.75 + 0.25 * Math.sin(t * 2.2 * p.f + p.ph * 3);
+      const a = p.b * (0.22 + 0.78 * depth) * twinkle * flicker;
+      if (p.kind === 2) {
+        const sz = p.s * scale * (0.6 + level * 0.8);
+        ctx.globalAlpha = a * 0.8;
+        ctx.drawImage(sprite, sx - sz, sy - sz, sz * 2, sz * 2);
+      } else {
+        const sz = p.s * scale;
+        ctx.globalAlpha = Math.min(1, a * (p.kind === 1 ? 0.8 : 0.95));
+        ctx.fillRect(sx, sy, sz, sz);
+      }
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+
+    // thin orbit ring
+    ctx.strokeStyle = `rgba(${c},0.10)`; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.ellipse(cx, cy, R * 1.45 * swell, R * 0.30 * swell, -0.12, 0, Math.PI * 2); ctx.stroke();
+    // tick marks around the orb, like a HUD dial
+    ctx.strokeStyle = `rgba(${c},0.45)`; ctx.lineWidth = 1;
+    for (let k = 0; k < 72; k++) {
+      const ang = k / 72 * Math.PI * 2 + rot * 0.3, long = k % 6 === 0;
+      const r1 = R * 1.32, r2 = r1 + (long ? 9 : 4);
+      ctx.beginPath(); ctx.moveTo(cx + Math.cos(ang) * r1, cy + Math.sin(ang) * r1);
+      ctx.lineTo(cx + Math.cos(ang) * r2, cy + Math.sin(ang) * r2); ctx.stroke();
+    }
+    requestAnimationFrame(draw);
+  }
+
+  resize(); paintSprite(color.map(Math.round)); requestAnimationFrame(draw);
+  return {
+    setState(s) { state = s; target = COLORS[s] || COLORS.idle; targetMotion = MOTION[s] || MOTION.idle; if (s === 'idle' || s === 'working') S.level = 0; },
+    snap() { color = target.slice(); motion = targetMotion.slice(); },
+  };
+})();
+
+/* =====================================================================
+   DEMO MODE — sample data, no server needed
+   ===================================================================== */
+const DEMO_PANELS = {
+  streak_days: 4, study_last_7: [1.5, 2, 0, 2, 1.5, 2, 0.5], study_hours_week: 6.5, study_target_hours: 14,
+  pipeline: { found: 12, applied: 3, interview: 1, offer: 0 },
+  directives: [
+    { text: 'Run Jarvis Phase 1 and test the voice loop', done: true },
+    { text: 'Push Jarvis to GitHub', done: false },
+    { text: '45 min Python: lists and dictionaries', done: false },
+  ],
+  roadmap: { current: 'Lists, dictionaries and loops', progress: 18, next: ['Functions and scope', 'Files with pathlib', 'Classes and objects'] },
+  wire: [
+    { tag: 'Demo data', text: 'This is sample data. Run run_hud.bat for the real thing.' },
+    { tag: 'Phase 4', text: '/ai-intel will fill this panel with GitHub trending and AI news.' },
+  ],
+};
+let demoTimer = null;
+function startDemo() {
+  S.demo = true; setConn('demo', 'Demo mode · no server');
+  S.panels = DEMO_PANELS; S.stats = { today: 7, avg: 4.6, hourly: [0,0,0,0,0,0,0,1,2,0,0,0,0,0,1,3,0,0,0,0,0,0,0,0], recent: [5.1, 4.2, 6.0, 3.8, 4.4, 4.9, 4.0] };
+  renderPanels(); renderStats();
+  const forced = params.get('state');
+  if (forced) {
+    addLine({ who: 'you', text: "What's the difference between a list and a tuple?" });
+    addLine({ who: 'jarvis', text: 'A list can change after you make it; a tuple is locked once created. Use tuples for things that should never move, like coordinates.', secs: 4.1 });
+    setState(forced); orb.snap();
+    if (forced === 'listening' || forced === 'speaking') setInterval(() => S.level = 0.35 + Math.random() * 0.5, 80);
+  } else setState('idle');
+}
+function demoHandle(m) {
+  const say = text => {
+    setState('working');
+    setTimeout(() => {
+      addLine({ who: 'jarvis', text, secs: 3.9 });
+      setState('speaking');
+      demoTimer = setInterval(() => S.level = 0.2 + Math.random() * 0.6, 90);
+      setTimeout(() => { clearInterval(demoTimer); setState('idle'); }, 3500);
+    }, 1800);
+  };
+  if (m.type === 'talk_start') { setState('listening'); demoTimer = setInterval(() => S.level = Math.random() * 0.7, 80); }
+  if (m.type === 'talk_stop') { clearInterval(demoTimer); addLine({ who: 'you', text: "What's a Python decorator?" }); say('A decorator wraps a function to add behaviour without changing its code. Think of it as a sleeve you slide over the function.'); }
+  if (m.type === 'text') { addLine({ who: 'you', text: m.label || m.text }); say('Demo mode, so this is a canned reply. Run the real server and Claude answers here.'); }
+  if (m.type === 'cancel') { clearInterval(demoTimer); setState('idle'); }
+  if (m.type === 'model') setModel(m.model);
+  if (m.type === 'directive') { const d = S.panels.directives[m.index]; d.done = !d.done; renderPanels(); }
+}
+
+connect();
+</script>
+</body>
+</html>

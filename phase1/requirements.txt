@@ -1,0 +1,6 @@
+faster-whisper
+kokoro-onnx
+sounddevice
+numpy
+fastapi
+uvicorn[standard]
