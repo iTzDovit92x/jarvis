@@ -24,13 +24,15 @@ import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 
-import talk   # reuse the ears, brain and voice from Phase 1
+import memory   # Phase 2: your vault of markdown files
+import router   # Phase 2: instant answers without AI
+import talk     # the ears, brain and voice from Phase 1
 
 HERE = Path(__file__).parent
 HUD_PAGE = HERE / "hud" / "index.html"
 DATA = HERE / "data"
 LOG_FILE = DATA / "log.jsonl"      # one line per request: the HUD's vitals come from here
-PANELS_FILE = DATA / "hud.json"    # your streak, roadmap, directives... edit this by hand for now
+OLD_PANELS = DATA / "hud.json"     # Phase 1's panel file; its to-do list moves into the vault once
 PORT = 8765
 
 
@@ -55,6 +57,8 @@ class Jarvis:
         talk.download_voice_model()
         talk.SESSION_DIR.mkdir(exist_ok=True)
         DATA.mkdir(exist_ok=True)
+        old = json.loads(OLD_PANELS.read_text(encoding="utf-8")).get("directives") if OLD_PANELS.exists() else None
+        memory.setup(old)
         print("Loading voice and ears...")
         self.kokoro = talk.Kokoro(str(talk.MODELS / "kokoro-v1.0.onnx"), str(talk.MODELS / "voices-v1.0.bin"))
         self.whisper = talk.WhisperModel(talk.WHISPER_MODEL, device="cpu", compute_type="int8")
@@ -75,10 +79,12 @@ class Jarvis:
         self.state = state
         await self.send({"type": "state", "state": state})
 
-    async def say_line(self, who, text, secs=None):
+    async def say_line(self, who, text, secs=None, tier=None):
         line = {"type": "transcript", "who": who, "text": text}
         if secs is not None:
             line["secs"] = secs
+        if tier is not None:
+            line["tier"] = tier
         self.history = (self.history + [line])[-30:]
         await self.send(line)
 
@@ -126,15 +132,19 @@ class Jarvis:
         self.busy = True
         try:
             await self.say_line("you", label or text)
-            await self.set_state("working")
             started = time.time()
-            talk.CLAUDE_MODEL = self.model
-            reply = await asyncio.to_thread(talk.ask_claude, self.claude, text, self.first_turn)
-            self.first_turn = False
+            reply, tier = router.route(text), 1          # Tier 1: answer from the vault, instantly
+            if reply is None:                              # Tier 2: ask Claude, with your context
+                await self.set_state("working")
+                talk.CLAUDE_MODEL = self.model
+                reply = await asyncio.to_thread(talk.ask_claude, self.claude, text,
+                                                self.first_turn, memory.context())
+                self.first_turn, tier = False, 2
             secs = round(time.time() - started, 1)
-            await self.say_line("jarvis", talk.clean_for_speech(reply), secs)
-            self.log(label or text, reply, secs, source)
+            await self.say_line("jarvis", talk.clean_for_speech(reply), secs, tier)
+            self.log(label or text, reply, secs, source, tier)
             await self.send({"type": "stats", "data": stats()})
+            await self.send({"type": "panels", "data": memory.panels()})
             await self.set_state("speaking")
             await asyncio.to_thread(self.speak, reply)
             await self.set_state("idle")
@@ -175,43 +185,18 @@ class Jarvis:
             sd.stop()
 
     # ----- memory --------------------------------------------------------------
-    def log(self, text, reply, secs, source):
-        row = {"ts": datetime.now().isoformat(timespec="seconds"), "tier": 2, "model": self.model,
+    def log(self, text, reply, secs, source, tier):
+        row = {"ts": datetime.now().isoformat(timespec="seconds"), "tier": tier,
+               "model": self.model if tier == 2 else None,
                "source": source, "secs": secs, "you": text, "jarvis": reply}
         with LOG_FILE.open("a", encoding="utf-8") as f:
             f.write(json.dumps(row) + "\n")
+        memory.log_request(text, reply, tier, secs)        # and a readable copy in today's daily note
 
 
 # ---------------------------------------------------------------------------
-# Panel data
+# Live vitals from the request log
 # ---------------------------------------------------------------------------
-STARTER_PANELS = {
-    "streak_days": 0,
-    "study_last_7": [0, 0, 0, 0, 0, 0, 0],
-    "study_hours_week": 0,
-    "study_target_hours": 14,
-    "pipeline": {"found": 0, "applied": 0, "interview": 0, "offer": 0},
-    "directives": [
-        {"text": "Test the Jarvis voice loop", "done": False},
-        {"text": "Push Jarvis to GitHub", "done": False},
-        {"text": "45 min Python: lists and dictionaries", "done": False},
-    ],
-    "roadmap": {"current": "Lists, dictionaries and loops", "progress": 0,
-                "next": ["Functions and scope", "Files with pathlib", "Classes and objects"]},
-    "wire": [{"tag": "Phase 4", "text": "/ai-intel will fill this with GitHub trending and AI news. Until then, edit data/hud.json."}],
-}
-
-
-def load_panels():
-    if not PANELS_FILE.exists():
-        PANELS_FILE.write_text(json.dumps(STARTER_PANELS, indent=2), encoding="utf-8")
-    return json.loads(PANELS_FILE.read_text(encoding="utf-8"))
-
-
-def save_panels(panels):
-    PANELS_FILE.write_text(json.dumps(panels, indent=2), encoding="utf-8")
-
-
 def stats():
     """Work out the live vitals from the request log."""
     rows = []
@@ -226,9 +211,10 @@ def stats():
     hourly = [0] * 24
     for r in todays:
         hourly[int(r["ts"][11:13])] += 1
-    avg = round(sum(r["secs"] for r in todays) / len(todays), 1) if todays else None
-    return {"today": len(todays), "avg": avg, "hourly": hourly,
-            "recent": [r["secs"] for r in rows[-20:]], "total": len(rows)}
+    claude_rows = [r for r in todays if r.get("tier", 2) == 2]
+    avg = round(sum(r["secs"] for r in claude_rows) / len(claude_rows), 1) if claude_rows else None
+    return {"today": len(todays), "instant": len(todays) - len(claude_rows), "avg": avg, "hourly": hourly,
+            "recent": [r["secs"] for r in rows[-20:] if r.get("tier", 2) == 2], "total": len(rows)}
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +244,7 @@ async def socket(ws: WebSocket):
     await ws.accept()
     jarvis.clients.add(ws)
     await ws.send_json({"type": "hello", "state": jarvis.state, "model": jarvis.model,
-                        "panels": load_panels(), "stats": stats(), "transcript": jarvis.history})
+                        "panels": memory.panels(), "stats": stats(), "transcript": jarvis.history})
     try:
         while True:
             msg = await ws.receive_json()
@@ -275,11 +261,8 @@ async def socket(ws: WebSocket):
                 jarvis.model = msg["model"]
                 await jarvis.send({"type": "model", "model": jarvis.model})
             elif kind == "directive":
-                panels = load_panels()
-                item = panels["directives"][int(msg["index"])]
-                item["done"] = not item["done"]
-                save_panels(panels)
-                await jarvis.send({"type": "panels", "data": panels})
+                memory.toggle_directive(int(msg["index"]))
+                await jarvis.send({"type": "panels", "data": memory.panels()})
     except WebSocketDisconnect:
         jarvis.clients.discard(ws)
 

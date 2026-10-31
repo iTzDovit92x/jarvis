@@ -4,3 +4,4 @@ sounddevice
 numpy
 fastapi
 uvicorn[standard]
+pytest

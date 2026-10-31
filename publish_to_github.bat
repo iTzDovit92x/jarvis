@@ -47,7 +47,10 @@ git config user.email "%GHID%+%GHUSER%@users.noreply.github.com"
 git add .
 git diff --cached --quiet
 if errorlevel 1 (
-    git commit -m "Jarvis v1: voice loop and HUD"
+    set "MSG="
+    set /p "MSG=Describe what changed (or press Enter for a default): "
+    if not defined MSG set "MSG=Update Jarvis"
+    call git commit -m "%%MSG%%"
     if errorlevel 1 goto failed
 ) else (
     echo Nothing new to commit.

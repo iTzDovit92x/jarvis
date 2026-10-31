@@ -91,9 +91,9 @@
     display: flex; align-items: center; justify-content: space-between; gap: 8px;
     font-size: 9.5px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--dim); margin-bottom: 10px;
   }
-  .label b { font-weight: 500; color: var(--text); display: flex; align-items: center; gap: 7px; }
+  .label b { white-space: nowrap; font-weight: 500; color: var(--text); display: flex; align-items: center; gap: 7px; }
   .label b::before { content: ""; width: 5px; height: 5px; background: rgb(var(--accent)); box-shadow: 0 0 6px rgb(var(--accent)); }
-  .label i { font-style: normal; color: var(--faint); letter-spacing: 0.12em; }
+  .label i { white-space: nowrap; font-style: normal; color: var(--faint); letter-spacing: 0.12em; }
 
   /* vitals */
   .vital { display: grid; grid-template-columns: 1fr 92px; align-items: end; padding: 8px 0; border-top: 1px dashed var(--line); }
@@ -124,6 +124,10 @@
   .transcript .line .who { font-size: 9px; letter-spacing: 0.18em; color: var(--faint); text-transform: uppercase; }
   .transcript .line.jarvis .who { color: rgb(var(--accent)); }
   .transcript .line .secs { color: var(--faint); font-size: 9px; margin-left: 6px; }
+  .transcript .line .tier { font-size: 8.5px; letter-spacing: 0.1em; margin-left: 6px; padding: 1px 5px; border: 1px solid var(--line-strong); color: var(--dim); }
+  .transcript .line .tier.t1 { border-color: rgba(var(--accent),0.7); color: rgb(var(--accent)); }
+  .say { margin-top: 9px; font-size: 9.5px; color: var(--faint); line-height: 1.5; }
+  .say em { font-style: normal; color: var(--dim); }
   .transcript .empty { color: var(--faint); }
 
   /* ---------- core ---------- */
@@ -235,7 +239,7 @@
     <div class="panel">
       <div class="label"><b>System vitals</b><i>live</i></div>
       <div class="vital"><div><div class="k">Requests today</div><div class="v" id="v-today">0</div></div><svg id="sp-hourly" viewBox="0 0 92 30"></svg></div>
-      <div class="vital"><div><div class="k">Avg reply</div><div class="v" id="v-avg">--</div></div><svg id="sp-replies" viewBox="0 0 92 30"></svg></div>
+      <div class="vital"><div><div class="k">Avg Claude reply</div><div class="v" id="v-avg">--</div></div><svg id="sp-replies" viewBox="0 0 92 30"></svg></div>
       <div class="vital"><div><div class="k">Study streak</div><div class="v" id="v-streak">0<small>days</small></div></div><svg id="sp-streak" viewBox="0 0 92 30"></svg></div>
       <div class="vital"><div><div class="k">Applications</div><div class="v" id="v-apps">0<small>sent</small></div></div><svg id="sp-pipe" viewBox="0 0 92 30"></svg></div>
     </div>
@@ -245,6 +249,7 @@
       <div class="big"><strong id="g-hours">0</strong><span id="g-of">of 14 hours</span></div>
       <div class="bar"><div class="fill" id="g-fill" style="width:0%"></div></div>
       <div class="ticks" id="g-ticks"></div>
+      <div class="say">Say <em>"log 45 minutes of Python"</em></div>
     </div>
 
     <div class="panel">
@@ -274,7 +279,7 @@
   <!-- RIGHT -->
   <section class="col right">
     <div class="panel">
-      <div class="label"><b>Quick actions</b><i>tier 2</i></div>
+      <div class="label"><b>Quick actions</b><i>tier 1 + 2</i></div>
       <div class="actions" id="actions"></div>
       <button class="linkish" id="toggle-planned">+ Planned skills</button>
       <div class="planned" id="planned"></div>
@@ -327,9 +332,9 @@ const ACTIONS = [
   { label: 'Python tip',  prompt: 'Give me one genuinely useful Python tip for a beginner, with a tiny example I can picture.' },
   { label: 'Quiz me',     prompt: 'Ask me one beginner Python quiz question. Just the question, then wait for my answer.' },
   { label: 'Plan tonight', prompt: 'I have about two hours tonight to learn Python. Give me a quick plan for the session.' },
-  { label: 'Explain a concept', prompt: 'Pick one core Python concept a beginner often finds confusing and explain it simply.' },
+  { label: "What's next", prompt: "what's next on my roadmap" },
+  { label: 'My week', prompt: 'how many hours have I studied this week' },
   { label: 'Motivate me', prompt: 'I am learning Python in my spare time. Give me a short, honest push to get started tonight.' },
-  { label: 'What can you do', prompt: 'In two sentences, what can you help me with right now?' },
 ];
 const PLANNED = [
   ['/plan-today', 'Phase 4'], ['/ai-intel', 'Phase 4'], ['/study-session', 'Phase 4'], ['/code-review', 'Phase 4'],
@@ -408,7 +413,7 @@ function bars(svg, values) {
 
 function renderStats() {
   const st = S.stats || {};
-  $('v-today').textContent = st.today ?? 0;
+  $('v-today').innerHTML = `${st.today ?? 0}<small>${st.instant || 0} instant</small>`;
   $('v-avg').innerHTML = st.avg != null ? `${st.avg}<small>sec</small>` : '--';
   sparkline($('sp-hourly'), st.hourly);
   sparkline($('sp-replies'), st.recent, { min: 5 });
@@ -426,7 +431,7 @@ function renderPanels() {
   const hrs = p.study_hours_week || 0, target = p.study_target_hours || 14;
   $('g-hours').textContent = hrs;
   $('g-of').textContent = `of ${target} hours`;
-  $('g-target').textContent = `target ${target}h`;
+  $('g-target').textContent = p.shift ? p.shift : `target ${target}h`;
   $('g-fill').style.width = Math.min(100, hrs / target * 100) + '%';
   $('g-ticks').innerHTML = [0, .25, .5, .75, 1].map(f => `<span>${Math.round(target * f)}</span>`).join('');
 
@@ -449,7 +454,9 @@ function addLine(m) {
   box.querySelector('.empty')?.remove();
   const div = document.createElement('div');
   div.className = 'line ' + m.who;
-  div.innerHTML = `<div class="who">${m.who === 'you' ? 'You' : 'Jarvis'}${m.secs ? `<span class="secs">${m.secs}s</span>` : ''}</div>${esc(m.text)}`;
+  const tier = m.tier ? `<span class="tier t${m.tier}">${m.tier === 1 ? 'T1 · instant' : 'T2 · Claude'}</span>` : '';
+  const secs = m.secs != null && m.tier !== 1 ? `<span class="secs">${m.secs}s</span>` : '';
+  div.innerHTML = `<div class="who">${m.who === 'you' ? 'You' : 'Jarvis'}${tier}${secs}</div>${esc(m.text)}`;
   box.appendChild(div);
   while (box.children.length > 40) box.firstChild.remove();
   box.scrollTop = box.scrollHeight;
@@ -654,7 +661,8 @@ const DEMO_PANELS = {
     { text: 'Push Jarvis to GitHub', done: false },
     { text: '45 min Python: lists and dictionaries', done: false },
   ],
-  roadmap: { current: 'Lists, dictionaries and loops', progress: 18, next: ['Functions and scope', 'Files with pathlib', 'Classes and objects'] },
+  roadmap: { current: 'Lists, dictionaries and loops', progress: 8, next: ['Functions and scope', 'Files with pathlib', 'Errors and try/except'] },
+  shift: 'backshift',
   wire: [
     { tag: 'Demo data', text: 'This is sample data. Run run_hud.bat for the real thing.' },
     { tag: 'Phase 4', text: '/ai-intel will fill this panel with GitHub trending and AI news.' },
@@ -663,12 +671,14 @@ const DEMO_PANELS = {
 let demoTimer = null;
 function startDemo() {
   S.demo = true; setConn('demo', 'Demo mode · no server');
-  S.panels = DEMO_PANELS; S.stats = { today: 7, avg: 4.6, hourly: [0,0,0,0,0,0,0,1,2,0,0,0,0,0,1,3,0,0,0,0,0,0,0,0], recent: [5.1, 4.2, 6.0, 3.8, 4.4, 4.9, 4.0] };
+  S.panels = DEMO_PANELS; S.stats = { today: 7, instant: 3, avg: 4.6, hourly: [0,0,0,0,0,0,0,1,2,0,0,0,0,0,1,3,0,0,0,0,0,0,0,0], recent: [5.1, 4.2, 6.0, 3.8, 4.4, 4.9, 4.0] };
   renderPanels(); renderStats();
   const forced = params.get('state');
   if (forced) {
     addLine({ who: 'you', text: "What's the difference between a list and a tuple?" });
-    addLine({ who: 'jarvis', text: 'A list can change after you make it; a tuple is locked once created. Use tuples for things that should never move, like coordinates.', secs: 4.1 });
+    addLine({ who: 'jarvis', text: 'A list can change after you make it; a tuple is locked once created. Use tuples for things that should never move, like coordinates.', secs: 4.1, tier: 2 });
+    addLine({ who: 'you', text: 'Log 45 minutes of Python' });
+    addLine({ who: 'jarvis', text: "Logged 45 minutes. That's 6.5 hours this week and a 4-day streak.", secs: 0, tier: 1 });
     setState(forced); orb.snap();
     if (forced === 'listening' || forced === 'speaking') setInterval(() => S.level = 0.35 + Math.random() * 0.5, 80);
   } else setState('idle');
@@ -677,7 +687,7 @@ function demoHandle(m) {
   const say = text => {
     setState('working');
     setTimeout(() => {
-      addLine({ who: 'jarvis', text, secs: 3.9 });
+      addLine({ who: 'jarvis', text, secs: 3.9, tier: 2 });
       setState('speaking');
       demoTimer = setInterval(() => S.level = 0.2 + Math.random() * 0.6, 90);
       setTimeout(() => { clearInterval(demoTimer); setState('idle'); }, 3500);

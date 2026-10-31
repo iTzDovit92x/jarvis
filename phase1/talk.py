@@ -22,6 +22,9 @@ import sounddevice as sd
 from faster_whisper import WhisperModel
 from kokoro_onnx import Kokoro
 
+import memory   # Phase 2: your vault of markdown files
+import router   # Phase 2: instant answers without AI
+
 # ---------------------------------------------------------------------------
 # Settings - change these to taste
 # ---------------------------------------------------------------------------
@@ -101,11 +104,12 @@ def transcribe(whisper, audio):
 # ---------------------------------------------------------------------------
 # Brain: ask Claude Code
 # ---------------------------------------------------------------------------
-def ask_claude(claude, message, first_turn):
-    """Send a message to Claude Code in headless mode and return its answer."""
+def ask_claude(claude, message, first_turn, context=""):
+    """Send a message to Claude Code in headless mode and return its answer.
+    context = a few lines from your vault (shift, current topic, streak) so answers fit your week."""
     command = [claude, "-p", message,
                "--model", CLAUDE_MODEL,
-               "--append-system-prompt", SYSTEM_PROMPT]
+               "--append-system-prompt", SYSTEM_PROMPT + (" Where things stand: " + context if context else "")]
     if not first_turn:
         command.append("--continue")   # carry on the same conversation
 
@@ -143,6 +147,7 @@ def main():
     claude = find_claude()
     download_voice_model()
     SESSION_DIR.mkdir(exist_ok=True)
+    memory.setup()
 
     print("Loading voice and ears (first run downloads Whisper, give it a minute)...")
     kokoro = Kokoro(str(MODELS / "kokoro-v1.0.onnx"), str(MODELS / "voices-v1.0.bin"))
@@ -167,9 +172,14 @@ def main():
 
         print(f"  You:    {message}")
         started = time.time()
-        reply = ask_claude(claude, message, first_turn)
-        first_turn = False
-        print(f"  Jarvis: {reply}   ({time.time() - started:.1f}s)")
+        reply = router.route(message)          # Tier 1: can the vault answer it instantly?
+        tier = 1
+        if reply is None:                      # Tier 2: no, ask Claude
+            reply = ask_claude(claude, message, first_turn, memory.context())
+            first_turn, tier = False, 2
+        secs = round(time.time() - started, 1)
+        print(f"  Jarvis: {reply}   (tier {tier}, {secs}s)")
+        memory.log_request(message, reply, tier, secs)
         speak(kokoro, reply)
 
 

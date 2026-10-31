@@ -64,6 +64,24 @@ Where the panels get their numbers:
 | Panel | Source |
 | --- | --- |
 | Requests today, Avg reply | `data/log.jsonl`, written automatically after every request |
-| Study streak, study hours, applications, roadmap, directives, AI wire | `data/hud.json`, which you edit by hand for now (skills will fill it later) |
+| Study streak, study hours, applications, roadmap, directives, AI wire | The vault in `data/vault/`, updated by voice or edited by hand |
 
 Open `hud/index.html?demo` straight in a browser to see it with sample data, no server needed.
+
+## Phase 2: memory and instant answers
+
+Your memory lives in `data/vault/` as plain markdown. Open that folder in Obsidian ("Open folder as vault") or edit the files in Notepad.
+
+| File | What's in it |
+| --- | --- |
+| `directives.md` | Your to-do list |
+| `shift.md` | This week's shift |
+| `learning/study-log.md` | One line per study session |
+| `learning/roadmap.md` | Python topics; tick them off as you go |
+| `jobs/pipeline.md` | Jobs you've applied for |
+| `wire.md` | AI wire items |
+| `daily/` | One note per day with everything you asked Jarvis |
+
+`router.py` holds the instant-answer rules. Each rule is a small function; add your own to the `RULES` list.
+
+Run the tests: `.venv\Scripts\python.exe -m pytest`
